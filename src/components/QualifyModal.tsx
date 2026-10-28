@@ -1,16 +1,27 @@
 import { useEffect, useState } from 'react';
-import { TIPO_OPTIONS, type Contato, type ContatoTipo } from '@/lib/supabase';
+import {
+  FUNIL_OPTIONS,
+  TIPO_OPTIONS,
+  type Contato,
+  type ContatoTipo,
+  type ContatoUpdate,
+  type FunilEtapa,
+} from '@/lib/supabase';
 import { Check, Loader2, X } from 'lucide-react';
 
 interface Props {
   contato: Contato;
   onClose: () => void;
-  onSave: (id: number, tipo: ContatoTipo, descricao: string) => Promise<void>;
+  onSave: (id: number, patch: ContatoUpdate) => Promise<void>;
 }
 
 export function QualifyModal({ contato, onClose, onSave }: Props) {
+  const [nome, setNome] = useState(contato.nome ?? '');
   const [tipo, setTipo] = useState<ContatoTipo>(contato.tipo);
-  const [descricao, setDescricao] = useState<string>(contato.descricao ?? '');
+  const [produto, setProduto] = useState(contato.produto_interesse ?? '');
+  const [bairro, setBairro] = useState(contato.bairro ?? '');
+  const [descricao, setDescricao] = useState(contato.descricao ?? '');
+  const [funil, setFunil] = useState<FunilEtapa>(contato.funil_etapa ?? 'Novo');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,14 +38,18 @@ export function QualifyModal({ contato, onClose, onSave }: Props) {
   }, [onClose]);
 
   const submit = async () => {
-    if (tipo === contato.tipo && descricao.trim() === (contato.descricao ?? '').trim()) {
-      onClose();
-      return;
-    }
+    const patch: ContatoUpdate = {
+      nome: nome.trim() || null,
+      tipo,
+      produto_interesse: produto.trim() || null,
+      bairro: bairro.trim() || null,
+      descricao: descricao.trim() || null,
+      funil_etapa: funil,
+    };
     setSaving(true);
     setError(null);
     try {
-      await onSave(contato.id, tipo, descricao.trim());
+      await onSave(contato.id, patch);
       onClose();
     } catch (err) {
       console.error('[QualifyModal] erro ao salvar contato:', err);
@@ -67,6 +82,16 @@ export function QualifyModal({ contato, onClose, onSave }: Props) {
         </div>
 
         <div className="px-5 py-5 space-y-5">
+          <Field label="Nome do contato">
+            <input
+              type="text"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              placeholder="Ex.: João Silva"
+              className={inputCls}
+            />
+          </Field>
+
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
               Tipo / categoria
@@ -92,6 +117,40 @@ export function QualifyModal({ contato, onClose, onSave }: Props) {
             </div>
           </div>
 
+          <Field label="Etapa do funil">
+            <select
+              value={funil}
+              onChange={(e) => setFunil(e.target.value as FunilEtapa)}
+              className={inputCls}
+            >
+              {FUNIL_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Produto de interesse">
+            <input
+              type="text"
+              value={produto}
+              onChange={(e) => setProduto(e.target.value)}
+              placeholder="Ex.: Tênis masculino, curso de inglês…"
+              className={inputCls}
+            />
+          </Field>
+
+          <Field label="Localização / Bairro">
+            <input
+              type="text"
+              value={bairro}
+              onChange={(e) => setBairro(e.target.value)}
+              placeholder="Ex.: Centro, Niterói…"
+              className={inputCls}
+            />
+          </Field>
+
           <div>
             <label
               htmlFor="qualify-desc"
@@ -103,8 +162,8 @@ export function QualifyModal({ contato, onClose, onSave }: Props) {
               id="qualify-desc"
               value={descricao}
               onChange={(e) => setDescricao(e.target.value)}
-              rows={4}
-              placeholder="Ex.: Produto de interesse, bairro, origem do lead…"
+              rows={3}
+              placeholder="Notas adicionais sobre o contato…"
               className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 resize-y"
             />
           </div>
@@ -137,6 +196,18 @@ export function QualifyModal({ contato, onClose, onSave }: Props) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+const inputCls =
+  'w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500';
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
+      {children}
     </div>
   );
 }

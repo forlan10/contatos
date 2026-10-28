@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   cleanWhatsAppNumber,
   fetchTriagem,
+  updateContato,
   type Contato,
   type ContatoTipo,
+  type ContatoUpdate,
   TIPO_OPTIONS,
-  updateContato,
 } from '@/lib/supabase';
 import {
   AlertTriangle,
@@ -20,6 +21,7 @@ import {
 import { ContactAvatar } from './ContactAvatar';
 import { TipoBadge } from './TipoBadge';
 import { QualifyModal } from './QualifyModal';
+import { InlineNameEditor } from './InlineNameEditor';
 
 export function TriagemTab() {
   const [contatos, setContatos] = useState<Contato[]>([]);
@@ -48,15 +50,33 @@ export function TriagemTab() {
 
   const pending = useMemo(() => contatos.length, [contatos]);
 
-  const handleSaveQualify = async (id: number, tipo: ContatoTipo, descricao: string) => {
+  const handleSaveQualify = async (id: number, patch: ContatoUpdate) => {
     try {
-      await updateContato(id, { tipo, descricao });
-      setContatos((prev) => prev.filter((c) => c.id !== id));
+      await updateContato(id, patch);
+      const stillTriagem = patch.tipo === 'em analise' || !patch.tipo;
+      setContatos((prev) =>
+        stillTriagem
+          ? prev.map((c) => (c.id === id ? { ...c, ...patch } : c))
+          : prev.filter((c) => c.id !== id)
+      );
     } catch (err) {
       console.error('[TriagemTab] erro ao qualificar contato:', err);
       const msg = err instanceof Error ? err.message : 'Erro ao qualificar contato';
       setError(msg);
       throw err;
+    }
+  };
+
+  const handleNameSave = async (id: number, novoNome: string | null) => {
+    try {
+      await updateContato(id, { nome: novoNome });
+      setContatos((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, nome: novoNome } : c))
+      );
+    } catch (err) {
+      console.error('[TriagemTab] erro ao atualizar nome:', err);
+      const msg = err instanceof Error ? err.message : 'Erro ao atualizar nome';
+      setError(msg);
     }
   };
 
@@ -94,6 +114,7 @@ export function TriagemTab() {
               key={c.id}
               contato={c}
               onQualify={() => setQualifying(c)}
+              onNameSave={(nome) => handleNameSave(c.id, nome)}
             />
           ))}
         </div>
@@ -113,9 +134,11 @@ export function TriagemTab() {
 function TriagemCard({
   contato,
   onQualify,
+  onNameSave,
 }: {
   contato: Contato;
   onQualify: () => void;
+  onNameSave: (nome: string | null) => void;
 }) {
   const clean = cleanWhatsAppNumber(contato.numero);
   const created = new Date(contato.created_at);
@@ -125,9 +148,7 @@ function TriagemCard({
       <div className="flex items-start gap-3">
         <ContactAvatar nome={contato.nome} tipo={contato.tipo} />
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-slate-900 truncate">
-            {contato.nome || 'Sem nome'}
-          </h3>
+          <InlineNameEditor nome={contato.nome} onSave={onNameSave} />
           <p className="text-sm text-slate-500 font-mono truncate">{clean || '—'}</p>
           <div className="flex items-center gap-1.5 mt-1.5 text-xs text-slate-400">
             <Clock size={12} />
