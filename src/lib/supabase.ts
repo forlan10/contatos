@@ -87,6 +87,16 @@ export async function fetchTriagem(): Promise<Contato[]> {
   return fetchContatosByTipo('em analise');
 }
 
+export async function fetchAllContatos(): Promise<Contato[]> {
+  if (!supabase) throw new Error('Supabase não configurado');
+  const { data, error } = await supabase
+    .from(TABLE_NAME)
+    .select(SELECT_COLS)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as Contato[];
+}
+
 export async function updateContato(id: number, patch: ContatoUpdate): Promise<void> {
   if (!supabase) throw new Error('Supabase não configurado');
   const { error } = await supabase.from(TABLE_NAME).update(patch).eq('id', id);

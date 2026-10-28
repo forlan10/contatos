@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { TriagemTab } from '@/components/TriagemTab';
 import { ClientesTab } from '@/components/ClientesTab';
+import { TodosTab } from '@/components/TodosTab';
 import { ConfigErrorBanner } from '@/components/ConfigErrorBanner';
-import { Inbox, Users } from 'lucide-react';
+import { Contact as ContactIcon, Inbox, Users } from 'lucide-react';
 
-type Tab = 'triagem' | 'clientes';
+type Tab = 'triagem' | 'clientes' | 'todos';
 
 function App() {
   const [tab, setTab] = useState<Tab>('triagem');
@@ -42,6 +43,12 @@ function App() {
               icon={<Users size={16} />}
               label="Esteira de Clientes"
             />
+            <TabButton
+              active={tab === 'todos'}
+              onClick={() => setTab('todos')}
+              icon={<ContactIcon size={16} />}
+              label="Todos os Contatos"
+            />
           </div>
         </nav>
       </header>
@@ -51,8 +58,10 @@ function App() {
           <ConfigErrorBanner />
         ) : tab === 'triagem' ? (
           <TriagemTab />
-        ) : (
+        ) : tab === 'clientes' ? (
           <ClientesTab />
+        ) : (
+          <TodosTab />
         )}
       </main>
     </div>
