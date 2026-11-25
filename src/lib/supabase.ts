@@ -54,19 +54,27 @@ export interface Contato {
   produto_interesse: string | null;
   bairro: string | null;
   funil_etapa: FunilEtapa | null;
+  novo: boolean;
 }
 
 export type ContatoUpdate = Partial<
   Pick<
     Contato,
-    'nome' | 'numero' | 'tipo' | 'descricao' | 'produto_interesse' | 'bairro' | 'funil_etapa'
+    | 'nome'
+    | 'numero'
+    | 'tipo'
+    | 'descricao'
+    | 'produto_interesse'
+    | 'bairro'
+    | 'funil_etapa'
+    | 'novo'
   >
 >;
 
 const TABLE_NAME = 'contatos_WAPP';
 
 const SELECT_COLS =
-  'id, created_at, nome, numero, tipo, descricao, produto_interesse, bairro, funil_etapa';
+  'id, created_at, nome, numero, tipo, descricao, produto_interesse, bairro, funil_etapa, novo';
 
 export async function fetchContatosByTipo(tipo: ContatoTipo): Promise<Contato[]> {
   if (!supabase) throw new Error('Supabase não configurado');

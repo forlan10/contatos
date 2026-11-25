@@ -80,6 +80,22 @@ export function TriagemTab() {
     }
   };
 
+  const handleDismissNovo = async (id: number) => {
+    setContatos((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, novo: false } : c))
+    );
+    try {
+      await updateContato(id, { novo: false });
+    } catch (err) {
+      console.error('[TriagemTab] erro ao marcar contato como visto:', err);
+      setContatos((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, novo: true } : c))
+      );
+      const msg = err instanceof Error ? err.message : 'Erro ao marcar contato como visto';
+      setError(msg);
+    }
+  };
+
   return (
     <section>
       <div className="flex items-center justify-between mb-5">
@@ -115,6 +131,7 @@ export function TriagemTab() {
               contato={c}
               onQualify={() => setQualifying(c)}
               onNameSave={(nome) => handleNameSave(c.id, nome)}
+              onDismissNovo={() => handleDismissNovo(c.id)}
             />
           ))}
         </div>
@@ -135,10 +152,12 @@ function TriagemCard({
   contato,
   onQualify,
   onNameSave,
+  onDismissNovo,
 }: {
   contato: Contato;
   onQualify: () => void;
   onNameSave: (nome: string | null) => void;
+  onDismissNovo: () => void;
 }) {
   const clean = cleanWhatsAppNumber(contato.numero);
   const created = new Date(contato.created_at);
@@ -148,7 +167,21 @@ function TriagemCard({
       <div className="flex items-start gap-3">
         <ContactAvatar nome={contato.nome} tipo={contato.tipo} />
         <div className="flex-1 min-w-0">
-          <InlineNameEditor nome={contato.nome} onSave={onNameSave} />
+          <div className="flex items-center gap-1.5 min-w-0">
+            <div className="flex-1 min-w-0">
+              <InlineNameEditor nome={contato.nome} onSave={onNameSave} />
+            </div>
+            {contato.novo && (
+              <button
+                onClick={onDismissNovo}
+                className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-sky-200 hover:bg-sky-200 transition-colors"
+                title="Marcar como visto"
+              >
+                Novo
+                <X size={10} />
+              </button>
+            )}
+          </div>
           <p className="text-sm text-slate-500 font-mono truncate">{clean || '—'}</p>
           <div className="flex items-center gap-1.5 mt-1.5 text-xs text-slate-400">
             <Clock size={12} />

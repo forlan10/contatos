@@ -14,7 +14,6 @@ import {
 import {
   AlertTriangle,
   Check,
-  Filter,
   Loader2,
   MapPin,
   Phone,
@@ -28,14 +27,21 @@ import { TipoBadge } from './TipoBadge';
 import { FunilBadge } from './FunilBadge';
 import { InlineNameEditor } from './InlineNameEditor';
 
+const COLUMN_ACCENT: Record<string, string> = {
+  Novo: 'bg-sky-500',
+  'Em Negociacao': 'bg-amber-500',
+  'Venda Fechada': 'bg-emerald-500',
+  Perdido: 'bg-slate-400',
+};
+
 export function ClientesTab() {
   const [contatos, setContatos] = useState<Contato[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [bairroFilter, setBairroFilter] = useState<string>('');
-  const [funilFilter, setFunilFilter] = useState<string>('');
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<FunilEtapa | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -56,34 +62,30 @@ export function ClientesTab() {
     load();
   }, []);
 
-  const bairros = useMemo(() => {
-    const set = new Set<string>();
-    contatos.forEach((c) => {
-      if (c.bairro && c.bairro.trim()) set.add(c.bairro.trim());
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [contatos]);
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+    if (!q) return contatos;
     return contatos.filter((c) => {
-      if (bairroFilter && (c.bairro ?? '').trim() !== bairroFilter) return false;
-      if (funilFilter && (c.funil_etapa ?? '') !== funilFilter) return false;
-      if (!q) return true;
       const nome = (c.nome ?? '').toLowerCase();
       const num = cleanWhatsAppNumber(c.numero).toLowerCase();
       const desc = (c.descricao ?? '').toLowerCase();
-      return nome.includes(q) || num.includes(q) || desc.includes(q);
+      const bairro = (c.bairro ?? '').toLowerCase();
+      return (
+        nome.includes(q) || num.includes(q) || desc.includes(q) || bairro.includes(q)
+      );
     });
-  }, [contatos, query, bairroFilter, funilFilter]);
+  }, [contatos, query]);
 
-  const hasActiveFilter = bairroFilter !== '' || funilFilter !== '' || query.trim() !== '';
-
-  const clearFilters = () => {
-    setQuery('');
-    setBairroFilter('');
-    setFunilFilter('');
-  };
+  const byEtapa = useMemo(() => {
+    const map = new Map<FunilEtapa, Contato[]>();
+    FUNIL_OPTIONS.forEach((f) => map.set(f, []));
+    filtered.forEach((c) => {
+      const etapa = (c.funil_etapa ?? 'Novo') as FunilEtapa;
+      if (!map.has(etapa)) map.set(etapa, []);
+      map.get(etapa)!.push(c);
+    });
+    return map;
+  }, [filtered]);
 
   const handleUpdate = async (id: number, patch: ContatoUpdate) => {
     try {
@@ -93,305 +95,459 @@ export function ClientesTab() {
       console.error('[ClientesTab] erro ao atualizar contato:', err);
       const msg = err instanceof Error ? err.message : 'Erro ao atualizar contato';
       setError(msg);
+      throw err;
     }
   };
 
   const handleNameSave = async (id: number, nome: string | null) => {
-    await handleUpdate(id, { nome });
+    try {
+      await updateContato(id, { nome });
+      setContatos((prev) => prev.map((c) => (c.id === id ? { ...c, nome } : c)));
+    } catch (err) {
+      console.error('[ClientesTab] erro ao atualizar nome:', err);
+      const msg = err instanceof Error ? err.message : 'Erro ao atualizar nome';
+      setError(msg);
+    }
   };
+
+  const moveCard = async (id: number, etapa: FunilEtapa) => {
+    const contato = contatos.find((c) => c.id === id);
+    if (!contato || (contato.funil_etapa ?? 'Novo') === etapa) return;
+    const prevEtapa = contato.funil_etapa;
+    setContatos((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, funil_etapa: etapa } : c))
+    );
+    try {
+      await updateContato(id, { funil_etapa: etapa });
+    } catch (err) {
+      console.error('[ClientesTab] erro ao mover cliente de etapa:', err);
+      setContatos((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, funil_etapa: prevEtapa } : c))
+      );
+      const msg = err instanceof Error ? err.message : 'Erro ao mover cliente de etapa';
+      setError(msg);
+    }
+  };
+
+  const detailContato =
+    editingId !== null ? contatos.find((c) => c.id === editingId) ?? null : null;
 
   return (
     <section>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div className="flex items-center gap-2.5">
           <h2 className="text-base font-semibold text-slate-800">Esteira de clientes</h2>
           <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-2 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">
             {contatos.length}
           </span>
         </div>
-        <div className="relative w-full sm:w-72">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-          />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por nome, número ou descrição"
-            className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-colors bg-white"
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 mb-5">
-        <div className="flex items-center gap-1.5 text-xs text-slate-400">
-          <Filter size={14} />
-        </div>
-        <select
-          value={bairroFilter}
-          onChange={(e) => setBairroFilter(e.target.value)}
-          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 bg-white"
-        >
-          <option value="">Todos os bairros</option>
-          {bairros.map((b) => (
-            <option key={b} value={b}>
-              {b}
-            </option>
-          ))}
-        </select>
-        <select
-          value={funilFilter}
-          onChange={(e) => setFunilFilter(e.target.value)}
-          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 bg-white"
-        >
-          <option value="">Todas as etapas</option>
-          {FUNIL_OPTIONS.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
-        {hasActiveFilter && (
+        <div className="flex items-center gap-2">
+          <div className="relative w-full sm:w-72">
+            <Search
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+            />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar por nome, número, bairro ou nota"
+              className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-colors bg-white"
+            />
+          </div>
           <button
-            onClick={clearFilters}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-sm text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+            onClick={load}
+            disabled={loading}
+            className="shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+            title="Atualizar"
           >
-            <X size={14} />
-            Limpar filtros
+            {loading ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <RefreshCw size={15} />
+            )}
           </button>
-        )}
-        {filtered.length !== contatos.length && (
-          <span className="text-xs text-slate-400 ml-auto">
-            {filtered.length} de {contatos.length}
-          </span>
-        )}
+        </div>
       </div>
 
-      {error ? (
-        <ErrorBanner message={error} onRetry={load} />
-      ) : loading ? (
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
         <div className="flex items-center justify-center py-20 text-slate-400">
           <Loader2 className="animate-spin" size={28} />
         </div>
       ) : filtered.length === 0 ? (
-        <EmptyState hasFilter={hasActiveFilter} onClear={clearFilters} />
+        <EmptyState hasFilter={query.trim().length > 0} onClear={() => setQuery('')} />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {filtered.map((c) => (
-            <ClienteCard
-              key={c.id}
-              contato={c}
-              editing={editingId === c.id}
-              onStartEdit={() => setEditingId(c.id)}
-              onCancelEdit={() => setEditingId(null)}
-              onSave={(patch) => {
-                handleUpdate(c.id, patch);
-                setEditingId(null);
-              }}
-              onNameSave={(nome) => handleNameSave(c.id, nome)}
-            />
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          {FUNIL_OPTIONS.map((etapa) => {
+            const lista = byEtapa.get(etapa) ?? [];
+            return (
+              <div
+                key={etapa}
+                onDragOver={(e) => {
+                  if (draggingId !== null) {
+                    e.preventDefault();
+                    setDropTarget(etapa);
+                  }
+                }}
+                onDragLeave={() => setDropTarget((t) => (t === etapa ? null : t))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDropTarget(null);
+                  if (draggingId !== null) {
+                    moveCard(draggingId, etapa);
+                    setDraggingId(null);
+                  }
+                }}
+                className={`rounded-xl border bg-slate-100/60 flex flex-col transition-colors ${
+                  dropTarget === etapa
+                    ? 'border-emerald-400 bg-emerald-50/60'
+                    : 'border-slate-200'
+                }`}
+              >
+                <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-200">
+                  <span
+                    className={`w-2 h-2 rounded-full ${COLUMN_ACCENT[etapa] ?? 'bg-slate-400'}`}
+                  />
+                  <h3 className="text-sm font-semibold text-slate-700">{etapa}</h3>
+                  <span className="ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-slate-200 text-slate-600 text-[11px] font-semibold">
+                    {lista.length}
+                  </span>
+                </div>
+                <div className="p-2 space-y-2 min-h-[120px] max-h-[calc(100vh-320px)] overflow-y-auto">
+                  {lista.length === 0 ? (
+                    <p className="text-xs text-slate-400 text-center py-6">
+                      Arraste um cliente para cá
+                    </p>
+                  ) : (
+                    lista.map((c) => (
+                      <PipelineCard
+                        key={c.id}
+                        contato={c}
+                        dragging={draggingId === c.id}
+                        onDragStart={() => setDraggingId(c.id)}
+                        onDragEnd={() => {
+                          setDraggingId(null);
+                          setDropTarget(null);
+                        }}
+                        onEdit={() => setEditingId(c.id)}
+                        onNameSave={(nome) => handleNameSave(c.id, nome)}
+                      />
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
+      )}
+
+      {detailContato && (
+        <DetailModal
+          contato={detailContato}
+          onClose={() => setEditingId(null)}
+          onSave={handleUpdate}
+        />
       )}
     </section>
   );
 }
 
-function ClienteCard({
+function PipelineCard({
   contato,
-  editing,
-  onStartEdit,
-  onCancelEdit,
-  onSave,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  onEdit,
   onNameSave,
 }: {
   contato: Contato;
-  editing: boolean;
-  onStartEdit: () => void;
-  onCancelEdit: () => void;
-  onSave: (patch: ContatoUpdate) => void;
+  dragging: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onEdit: () => void;
   onNameSave: (nome: string | null) => void;
 }) {
   const clean = cleanWhatsAppNumber(contato.numero);
-  const [desc, setDesc] = useState(contato.descricao ?? '');
-  const [tipo, setTipo] = useState<ContatoTipo>(contato.tipo);
-  const [produto, setProduto] = useState(contato.produto_interesse ?? '');
-  const [bairro, setBairro] = useState(contato.bairro ?? '');
-  const [funil, setFunil] = useState<FunilEtapa>(contato.funil_etapa ?? 'Novo');
-
-  useEffect(() => {
-    setDesc(contato.descricao ?? '');
-    setTipo(contato.tipo);
-    setProduto(contato.produto_interesse ?? '');
-    setBairro(contato.bairro ?? '');
-    setFunil(contato.funil_etapa ?? 'Novo');
-  }, [contato]);
-
-  const save = () => {
-    const patch: ContatoUpdate = {};
-    if (desc.trim() !== (contato.descricao ?? '').trim()) patch.descricao = desc.trim() || null;
-    if (tipo !== contato.tipo) patch.tipo = tipo;
-    if (produto.trim() !== (contato.produto_interesse ?? '').trim())
-      patch.produto_interesse = produto.trim() || null;
-    if (bairro.trim() !== (contato.bairro ?? '').trim())
-      patch.bairro = bairro.trim() || null;
-    if (funil !== (contato.funil_etapa ?? 'Novo')) patch.funil_etapa = funil;
-    onSave(patch);
-  };
 
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
-      <div className="flex items-start gap-3">
+    <article
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onClick={onEdit}
+      className={`rounded-lg border border-slate-200 bg-white p-3 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md hover:border-slate-300 transition-all ${
+        dragging ? 'opacity-40' : ''
+      }`}
+      title="Clique para editar · arraste para mudar de etapa"
+    >
+      <div className="flex items-start gap-2.5">
         <ContactAvatar nome={contato.nome} tipo={contato.tipo} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <InlineNameEditor nome={contato.nome} onSave={onNameSave} />
-            <TipoBadge tipo={contato.tipo} />
-          </div>
-          <p className="text-sm text-slate-500 font-mono truncate">{clean || '—'}</p>
-          {!editing && contato.funil_etapa && (
-            <div className="mt-1.5">
-              <FunilBadge etapa={contato.funil_etapa} />
-            </div>
-          )}
+        <div className="flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+          <InlineNameEditor nome={contato.nome} onSave={onNameSave} />
+          <p className="text-xs text-slate-500 font-mono truncate">{clean || '—'}</p>
         </div>
+        <TipoBadge tipo={contato.tipo} />
       </div>
 
-      {!editing && (
-        <div className="mt-3 space-y-1">
-          {contato.produto_interesse && (
-            <p className="text-sm text-slate-600">
-              <span className="text-slate-400">Interesse:</span> {contato.produto_interesse}
-            </p>
-          )}
-          {contato.bairro && (
-            <p className="text-sm text-slate-600 flex items-center gap-1">
-              <MapPin size={13} className="text-slate-400 shrink-0" />
-              {contato.bairro}
-            </p>
-          )}
-          {contato.descricao ? (
-            <p className="text-sm text-slate-600 bg-slate-50 rounded-md px-3 py-2 border border-slate-100 whitespace-pre-wrap">
-              {contato.descricao}
-            </p>
-          ) : (
-            <p className="text-sm text-slate-400 italic">Sem descrição.</p>
-          )}
-        </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+        {contato.bairro && (
+          <span className="inline-flex items-center gap-0.5">
+            <MapPin size={11} className="text-slate-400" />
+            {contato.bairro}
+          </span>
+        )}
+        {contato.produto_interesse && (
+          <span className="truncate max-w-[10rem]">{contato.produto_interesse}</span>
+        )}
+      </div>
+
+      {contato.descricao && (
+        <p className="mt-2 text-xs text-slate-600 line-clamp-2 bg-slate-50 rounded-md px-2 py-1.5 border border-slate-100">
+          {contato.descricao}
+        </p>
       )}
 
-      {editing ? (
-        <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">
-                Status / tipo
-              </label>
-              <select
-                value={tipo}
-                onChange={(e) => setTipo(e.target.value as ContatoTipo)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 bg-white"
-              >
-                {TIPO_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">
-                Etapa do funil
-              </label>
-              <select
-                value={funil}
-                onChange={(e) => setFunil(e.target.value as FunilEtapa)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 bg-white"
-              >
-                {FUNIL_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">
-                Produto de interesse
-              </label>
-              <input
-                type="text"
-                value={produto}
-                onChange={(e) => setProduto(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
-                placeholder="Ex.: Tênis masculino"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">
-                Bairro
-              </label>
-              <input
-                type="text"
-                value={bairro}
-                onChange={(e) => setBairro(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
-                placeholder="Ex.: Centro"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1.5">
-              Descrição
-            </label>
-            <textarea
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              rows={3}
-              placeholder="Notas sobre o cliente…"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 resize-y"
-            />
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={onCancelEdit}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors"
-            >
-              <X size={15} />
-              Cancelar
-            </button>
-            <button
-              onClick={save}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-600/20"
-            >
-              <Check size={15} />
-              Salvar
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-4 flex gap-2">
+      <div className="mt-2.5 flex items-center justify-between">
+        <FunilBadge etapa={contato.funil_etapa} />
+        {clean && (
           <a
             href={whatsappLink(contato.numero)}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 active:scale-[0.98] transition-all shadow-sm shadow-emerald-600/20"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-slate-200 text-emerald-600 hover:bg-emerald-50 transition-colors"
+            title="Abrir no WhatsApp"
           >
-            <Phone size={15} />
-            Abrir no WhatsApp
+            <Phone size={13} />
           </a>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function DetailModal({
+  contato,
+  onClose,
+  onSave,
+}: {
+  contato: Contato;
+  onClose: () => void;
+  onSave: (id: number, patch: ContatoUpdate) => Promise<void>;
+}) {
+  const [nome, setNome] = useState(contato.nome ?? '');
+  const [tipo, setTipo] = useState<ContatoTipo>(contato.tipo);
+  const [produto, setProduto] = useState(contato.produto_interesse ?? '');
+  const [bairro, setBairro] = useState(contato.bairro ?? '');
+  const [descricao, setDescricao] = useState(contato.descricao ?? '');
+  const [funil, setFunil] = useState<FunilEtapa>(contato.funil_etapa ?? 'Novo');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  const submit = async () => {
+    const patch: ContatoUpdate = {
+      nome: nome.trim() || null,
+      tipo,
+      produto_interesse: produto.trim() || null,
+      bairro: bairro.trim() || null,
+      descricao: descricao.trim() || null,
+      funil_etapa: funil,
+    };
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(contato.id, patch);
+      onClose();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Falha ao salvar';
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const clean = cleanWhatsAppNumber(contato.numero);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden
+      />
+      <div className="relative w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-slate-200 max-h-[92vh] overflow-y-auto animate-[modalIn_.18s_ease-out]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white rounded-t-2xl">
+          <div className="flex items-center gap-3 min-w-0">
+            <ContactAvatar nome={contato.nome} tipo={contato.tipo} />
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-slate-900 truncate">
+                {contato.nome || 'Sem nome'}
+              </h3>
+              <p className="text-xs text-slate-500 font-mono truncate">{clean || '—'}</p>
+            </div>
+          </div>
           <button
-            onClick={onStartEdit}
-            className="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors"
+            onClick={onClose}
+            className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
           >
-            Editar
+            <X size={18} />
           </button>
         </div>
-      )}
-    </article>
+
+        <div className="px-5 py-5 space-y-5">
+          {clean && (
+            <a
+              href={whatsappLink(contato.numero)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-600/20"
+            >
+              <Phone size={16} />
+              Abrir conversa no WhatsApp
+            </a>
+          )}
+
+          <Field label="Nome do contato">
+            <input
+              type="text"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              placeholder="Ex.: João Silva"
+              className={inputCls}
+            />
+          </Field>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Tipo / categoria
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {TIPO_OPTIONS.map((opt) => {
+                const active = opt === tipo;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setTipo(opt)}
+                    className={`px-3 py-2.5 rounded-lg text-sm font-medium border transition-all ${
+                      active
+                        ? 'border-emerald-600 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <Field label="Etapa do funil">
+            <select
+              value={funil}
+              onChange={(e) => setFunil(e.target.value as FunilEtapa)}
+              className={inputCls}
+            >
+              {FUNIL_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Produto de interesse">
+            <input
+              type="text"
+              value={produto}
+              onChange={(e) => setProduto(e.target.value)}
+              placeholder="Ex.: Tênis masculino, curso de inglês…"
+              className={inputCls}
+            />
+          </Field>
+
+          <Field label="Localização / Bairro">
+            <input
+              type="text"
+              value={bairro}
+              onChange={(e) => setBairro(e.target.value)}
+              placeholder="Ex.: Centro, Niterói…"
+              className={inputCls}
+            />
+          </Field>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Descrição / observações
+            </label>
+            <textarea
+              value={descricao}
+              onChange={(e) => setDescricao(e.target.value)}
+              rows={3}
+              placeholder="Notas adicionais sobre o contato…"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 resize-y"
+            />
+          </div>
+
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-2 px-5 py-4 border-t border-slate-100 sticky bottom-0 bg-white">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2.5 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={submit}
+            disabled={saving}
+            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-60 transition-colors shadow-sm shadow-emerald-600/20"
+          >
+            {saving ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Check size={16} />
+            )}
+            Salvar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const inputCls =
+  'w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500';
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
+      {children}
+    </div>
   );
 }
 
@@ -412,7 +568,7 @@ function EmptyState({
       </h3>
       <p className="text-sm text-slate-400 mt-1 max-w-sm">
         {hasFilter
-          ? 'Tente outra busca ou ajuste os filtros.'
+          ? 'Tente outra busca.'
           : 'Qualifique contatos da aba Triagem como “cliente” para vê-los aqui.'}
       </p>
       {hasFilter && (
@@ -421,32 +577,9 @@ function EmptyState({
           className="mt-4 inline-flex items-center gap-2 text-sm text-emerald-700 hover:text-emerald-800 font-medium"
         >
           <RefreshCw size={14} />
-          Limpar filtros
+          Limpar busca
         </button>
       )}
-    </div>
-  );
-}
-
-function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
-      <div className="w-12 h-12 rounded-xl bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3">
-        <AlertTriangle size={24} />
-      </div>
-      <h3 className="text-base font-semibold text-red-900">
-        Não foi possível carregar os clientes
-      </h3>
-      <p className="text-sm text-red-700 mt-1.5 font-mono break-words max-w-xl mx-auto">
-        {message}
-      </p>
-      <button
-        onClick={onRetry}
-        className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-red-300 text-red-700 text-sm font-medium hover:bg-red-100 transition-colors"
-      >
-        <RefreshCw size={15} />
-        Tentar novamente
-      </button>
     </div>
   );
 }
