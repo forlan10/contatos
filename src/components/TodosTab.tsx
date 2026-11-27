@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   cleanWhatsAppNumber,
   fetchAllContatos,
-  FUNIL_OPTIONS,
+  fetchFunilEtapas,
   TIPO_OPTIONS,
   updateContato,
   whatsappLink,
@@ -28,6 +28,7 @@ import { FunilBadge } from './FunilBadge';
 
 export function TodosTab() {
   const [contatos, setContatos] = useState<Contato[]>([]);
+  const [etapas, setEtapas] = useState<FunilEtapa[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -39,8 +40,9 @@ export function TodosTab() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchAllContatos();
+      const [data, etapasData] = await Promise.all([fetchAllContatos(), fetchFunilEtapas()]);
       setContatos(data);
+      setEtapas(etapasData);
     } catch (err) {
       console.error('[TodosTab] erro ao buscar contatos:', err);
       const msg = err instanceof Error ? err.message : 'Erro ao carregar contatos';
@@ -135,9 +137,9 @@ export function TodosTab() {
           className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 bg-white"
         >
           <option value="">Todas as etapas</option>
-          {FUNIL_OPTIONS.map((f) => (
-            <option key={f} value={f}>
-              {f}
+          {etapas.map((f) => (
+            <option key={f.id} value={f.nome}>
+              {f.nome}
             </option>
           ))}
         </select>
@@ -202,6 +204,7 @@ export function TodosTab() {
       {detailContato && (
         <DetailModal
           contato={detailContato}
+          etapas={etapas}
           onClose={() => setDetailId(null)}
           onSave={handleUpdate}
         />
@@ -317,10 +320,12 @@ function RowCard({
 
 function DetailModal({
   contato,
+  etapas,
   onClose,
   onSave,
 }: {
   contato: Contato;
+  etapas: FunilEtapa[];
   onClose: () => void;
   onSave: (id: number, patch: ContatoUpdate) => Promise<void>;
 }) {
@@ -329,7 +334,9 @@ function DetailModal({
   const [produto, setProduto] = useState(contato.produto_interesse ?? '');
   const [bairro, setBairro] = useState(contato.bairro ?? '');
   const [descricao, setDescricao] = useState(contato.descricao ?? '');
-  const [funil, setFunil] = useState<FunilEtapa>(contato.funil_etapa ?? 'Novo');
+  const [funil, setFunil] = useState<string>(
+    contato.funil_etapa ?? etapas[0]?.nome ?? 'Novo'
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -446,12 +453,12 @@ function DetailModal({
           <Field label="Etapa do funil">
             <select
               value={funil}
-              onChange={(e) => setFunil(e.target.value as FunilEtapa)}
+              onChange={(e) => setFunil(e.target.value)}
               className={inputCls}
             >
-              {FUNIL_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
+              {etapas.map((opt) => (
+                <option key={opt.id} value={opt.nome}>
+                  {opt.nome}
                 </option>
               ))}
             </select>

@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   cleanWhatsAppNumber,
+  createFunilEtapa,
+  deleteFunilEtapa,
   fetchClientes,
-  FUNIL_OPTIONS,
+  fetchFunilEtapas,
   TIPO_OPTIONS,
   updateContato,
+  updateFunilEtapa,
   whatsappLink,
   type Contato,
   type ContatoTipo,
@@ -16,9 +19,13 @@ import {
   Check,
   Loader2,
   MapPin,
+  Pencil,
   Phone,
+  Plus,
   RefreshCw,
   Search,
+  Settings2,
+  Trash2,
   Users,
   X,
 } from 'lucide-react';
@@ -34,33 +41,60 @@ const COLUMN_ACCENT: Record<string, string> = {
   Perdido: 'bg-slate-400',
 };
 
+const ACCENT_PALETTE = [
+  'bg-sky-500',
+  'bg-amber-500',
+  'bg-emerald-500',
+  'bg-slate-400',
+  'bg-rose-500',
+  'bg-cyan-500',
+  'bg-lime-500',
+  'bg-orange-500',
+  'bg-teal-500',
+  'bg-fuchsia-500',
+];
+
+const FALLBACK_ETAPAS: FunilEtapa[] = [
+  { id: -1, nome: 'Novo', ordem: 1 },
+  { id: -2, nome: 'Em Negociacao', ordem: 2 },
+  { id: -3, nome: 'Venda Fechada', ordem: 3 },
+  { id: -4, nome: 'Perdido', ordem: 4 },
+];
+
 export function ClientesTab() {
   const [contatos, setContatos] = useState<Contato[]>([]);
+  const [etapas, setEtapas] = useState<FunilEtapa[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
-  const [dropTarget, setDropTarget] = useState<FunilEtapa | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [managingEtapas, setManagingEtapas] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchClientes();
-      setContatos(data);
+      const [clientesData, etapasData] = await Promise.all([
+        fetchClientes(),
+        fetchFunilEtapas(),
+      ]);
+      setContatos(clientesData);
+      setEtapas(etapasData.length > 0 ? etapasData : FALLBACK_ETAPAS);
     } catch (err) {
-      console.error('[ClientesTab] erro ao buscar clientes:', err);
+      console.error('[ClientesTab] erro ao buscar dados:', err);
       const msg = err instanceof Error ? err.message : 'Erro ao carregar clientes';
       setError(msg);
+      setEtapas((prev) => (prev.length > 0 ? prev : FALLBACK_ETAPAS));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -77,15 +111,16 @@ export function ClientesTab() {
   }, [contatos, query]);
 
   const byEtapa = useMemo(() => {
-    const map = new Map<FunilEtapa, Contato[]>();
-    FUNIL_OPTIONS.forEach((f) => map.set(f, []));
+    const map = new Map<string, Contato[]>();
+    etapas.forEach((e) => map.set(e.nome, []));
     filtered.forEach((c) => {
-      const etapa = (c.funil_etapa ?? 'Novo') as FunilEtapa;
+      const etapa = c.funil_etapa ?? etapas[0]?.nome;
+      if (!etapa) return;
       if (!map.has(etapa)) map.set(etapa, []);
       map.get(etapa)!.push(c);
     });
     return map;
-  }, [filtered]);
+  }, [filtered, etapas]);
 
   const handleUpdate = async (id: number, patch: ContatoUpdate) => {
     try {
@@ -110,9 +145,9 @@ export function ClientesTab() {
     }
   };
 
-  const moveCard = async (id: number, etapa: FunilEtapa) => {
+  const moveCard = async (id: number, etapa: string) => {
     const contato = contatos.find((c) => c.id === id);
-    if (!contato || (contato.funil_etapa ?? 'Novo') === etapa) return;
+    if (!contato || (contato.funil_etapa ?? '') === etapa) return;
     const prevEtapa = contato.funil_etapa;
     setContatos((prev) =>
       prev.map((c) => (c.id === id ? { ...c, funil_etapa: etapa } : c))
@@ -156,6 +191,14 @@ export function ClientesTab() {
             />
           </div>
           <button
+            onClick={() => setManagingEtapas(true)}
+            className="shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
+            title="Gerenciar etapas do funil"
+          >
+            <Settings2 size={15} />
+            Etapas
+          </button>
+          <button
             onClick={load}
             disabled={loading}
             className="shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
@@ -180,41 +223,47 @@ export function ClientesTab() {
         <div className="flex items-center justify-center py-20 text-slate-400">
           <Loader2 className="animate-spin" size={28} />
         </div>
-      ) : filtered.length === 0 ? (
-        <EmptyState hasFilter={query.trim().length > 0} onClear={() => setQuery('')} />
+      ) : filtered.length === 0 && contatos.length === 0 ? (
+        <EmptyState />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {FUNIL_OPTIONS.map((etapa) => {
-            const lista = byEtapa.get(etapa) ?? [];
+        <div
+          className="grid gap-4 items-start"
+          style={{
+            gridTemplateColumns: `repeat(${Math.min(etapas.length, 4)}, minmax(0, 1fr))`,
+          }}
+        >
+          {etapas.map((etapa, idx) => {
+            const lista = byEtapa.get(etapa.nome) ?? [];
+            const accent = COLUMN_ACCENT[etapa.nome] ?? ACCENT_PALETTE[idx % ACCENT_PALETTE.length];
             return (
               <div
-                key={etapa}
+                key={etapa.id}
                 onDragOver={(e) => {
                   if (draggingId !== null) {
                     e.preventDefault();
-                    setDropTarget(etapa);
+                    setDropTarget(etapa.nome);
                   }
                 }}
-                onDragLeave={() => setDropTarget((t) => (t === etapa ? null : t))}
+                onDragLeave={() => setDropTarget((t) => (t === etapa.nome ? null : t))}
                 onDrop={(e) => {
                   e.preventDefault();
                   setDropTarget(null);
                   if (draggingId !== null) {
-                    moveCard(draggingId, etapa);
+                    moveCard(draggingId, etapa.nome);
                     setDraggingId(null);
                   }
                 }}
                 className={`rounded-xl border bg-slate-100/60 flex flex-col transition-colors ${
-                  dropTarget === etapa
+                  dropTarget === etapa.nome
                     ? 'border-emerald-400 bg-emerald-50/60'
                     : 'border-slate-200'
                 }`}
               >
                 <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-200">
-                  <span
-                    className={`w-2 h-2 rounded-full ${COLUMN_ACCENT[etapa] ?? 'bg-slate-400'}`}
-                  />
-                  <h3 className="text-sm font-semibold text-slate-700">{etapa}</h3>
+                  <span className={`w-2 h-2 rounded-full ${accent}`} />
+                  <h3 className="text-sm font-semibold text-slate-700 truncate">
+                    {etapa.nome}
+                  </h3>
                   <span className="ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-slate-200 text-slate-600 text-[11px] font-semibold">
                     {lista.length}
                   </span>
@@ -250,11 +299,237 @@ export function ClientesTab() {
       {detailContato && (
         <DetailModal
           contato={detailContato}
+          etapas={etapas}
           onClose={() => setEditingId(null)}
           onSave={handleUpdate}
         />
       )}
+
+      {managingEtapas && (
+        <ManageEtapasModal
+          etapas={etapas}
+          onClose={() => setManagingEtapas(false)}
+          onChanged={load}
+        />
+      )}
     </section>
+  );
+}
+
+function ManageEtapasModal({
+  etapas,
+  onClose,
+  onChanged,
+}: {
+  etapas: FunilEtapa[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [novoNome, setNovoNome] = useState('');
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [editNome, setEditNome] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const addEtapa = async () => {
+    const nome = novoNome.trim();
+    if (!nome) return;
+    setError(null);
+    try {
+      const maxOrdem = etapas.reduce((max, e) => Math.max(max, e.ordem), 0);
+      await createFunilEtapa(nome, maxOrdem + 1);
+      setNovoNome('');
+      onChanged();
+    } catch (err) {
+      console.error('[ManageEtapas] erro ao criar etapa:', err);
+      setError(err instanceof Error ? err.message : 'Erro ao criar etapa');
+    }
+  };
+
+  const renameEtapa = async (etapa: FunilEtapa) => {
+    const nome = editNome.trim();
+    if (!nome || nome === etapa.nome) {
+      setEditandoId(null);
+      return;
+    }
+    setBusyId(etapa.id);
+    setError(null);
+    try {
+      await updateFunilEtapa(etapa.id, { nome });
+      onChanged();
+      setEditandoId(null);
+    } catch (err) {
+      console.error('[ManageEtapas] erro ao renomear etapa:', err);
+      setError(err instanceof Error ? err.message : 'Erro ao renomear etapa');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const removeEtapa = async (etapa: FunilEtapa) => {
+    const clientesNaEtapa = etapas.length;
+    if (etapas.length <= 1) {
+      setError('Você precisa ter pelo menos uma etapa.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `Remover a etapa "${etapa.nome}"? Os clientes desta etapa ficarão sem etapa definida e aparecerão na primeira coluna.`
+    );
+    if (!confirmed) return;
+    setBusyId(etapa.id);
+    setError(null);
+    try {
+      await deleteFunilEtapa(etapa.id);
+      onChanged();
+    } catch (err) {
+      console.error('[ManageEtapas] erro ao remover etapa:', err);
+      setError(err instanceof Error ? err.message : 'Erro ao remover etapa');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden
+      />
+      <div className="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-slate-200 max-h-[92vh] overflow-y-auto animate-[modalIn_.18s_ease-out]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white rounded-t-2xl">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">Etapas do funil</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Adicione, renomeie ou remova as colunas da esteira
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="px-5 py-5 space-y-4">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={novoNome}
+              onChange={(e) => setNovoNome(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') addEtapa();
+              }}
+              placeholder="Nome da nova etapa"
+              className="flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+            />
+            <button
+              onClick={addEtapa}
+              disabled={!novoNome.trim()}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+            >
+              <Plus size={15} />
+              Adicionar
+            </button>
+          </div>
+
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
+            {etapas.map((etapa, idx) => (
+              <li key={etapa.id} className="flex items-center gap-2 px-3 py-2.5 bg-white">
+                <span className="text-xs text-slate-400 w-5">{idx + 1}.</span>
+                {editandoId === etapa.id ? (
+                  <>
+                    <input
+                      autoFocus
+                      type="text"
+                      value={editNome}
+                      onChange={(e) => setEditNome(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') renameEtapa(etapa);
+                        if (e.key === 'Escape') setEditandoId(null);
+                      }}
+                      className="flex-1 rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+                    />
+                    <button
+                      onClick={() => renameEtapa(etapa)}
+                      disabled={busyId === etapa.id}
+                      className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
+                      title="Salvar"
+                    >
+                      {busyId === etapa.id ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : (
+                        <Check size={15} />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setEditandoId(null)}
+                      className="p-1.5 rounded-md text-slate-400 hover:bg-slate-100"
+                      title="Cancelar"
+                    >
+                      <X size={15} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex-1 text-sm font-medium text-slate-700 truncate">
+                      {etapa.nome}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setEditandoId(etapa.id);
+                        setEditNome(etapa.nome);
+                      }}
+                      className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                      title="Renomear"
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      onClick={() => removeEtapa(etapa)}
+                      disabled={busyId === etapa.id || etapas.length <= 1}
+                      className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 transition-colors"
+                      title={
+                        etapas.length <= 1
+                          ? 'Precisa ter pelo menos uma etapa'
+                          : 'Remover etapa'
+                      }
+                    >
+                      {busyId === etapa.id ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={15} />
+                      )}
+                    </button>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          <p className="text-xs text-slate-400">
+            Ao remover uma etapa, os clientes dela ficam sem etapa e aparecem na
+            primeira coluna. Nenhum cliente é apagado.
+          </p>
+        </div>
+
+        <div className="px-5 py-4 border-t border-slate-100 sticky bottom-0 bg-white">
+          <button
+            onClick={onClose}
+            className="w-full px-4 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-900 transition-colors"
+          >
+            Concluir
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -334,10 +609,12 @@ function PipelineCard({
 
 function DetailModal({
   contato,
+  etapas,
   onClose,
   onSave,
 }: {
   contato: Contato;
+  etapas: FunilEtapa[];
   onClose: () => void;
   onSave: (id: number, patch: ContatoUpdate) => Promise<void>;
 }) {
@@ -346,7 +623,9 @@ function DetailModal({
   const [produto, setProduto] = useState(contato.produto_interesse ?? '');
   const [bairro, setBairro] = useState(contato.bairro ?? '');
   const [descricao, setDescricao] = useState(contato.descricao ?? '');
-  const [funil, setFunil] = useState<FunilEtapa>(contato.funil_etapa ?? 'Novo');
+  const [funil, setFunil] = useState<string>(
+    contato.funil_etapa ?? etapas[0]?.nome ?? 'Novo'
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -463,12 +742,12 @@ function DetailModal({
           <Field label="Etapa do funil">
             <select
               value={funil}
-              onChange={(e) => setFunil(e.target.value as FunilEtapa)}
+              onChange={(e) => setFunil(e.target.value)}
               className={inputCls}
             >
-              {FUNIL_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
+              {etapas.map((opt) => (
+                <option key={opt.id} value={opt.nome}>
+                  {opt.nome}
                 </option>
               ))}
             </select>
@@ -551,35 +830,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function EmptyState({
-  hasFilter,
-  onClear,
-}: {
-  hasFilter: boolean;
-  onClear: () => void;
-}) {
+function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
       <div className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-4">
         <Users size={30} />
       </div>
-      <h3 className="text-base font-semibold text-slate-700">
-        {hasFilter ? 'Nenhum resultado' : 'Sem clientes ainda'}
-      </h3>
+      <h3 className="text-base font-semibold text-slate-700">Sem clientes ainda</h3>
       <p className="text-sm text-slate-400 mt-1 max-w-sm">
-        {hasFilter
-          ? 'Tente outra busca.'
-          : 'Qualifique contatos da aba Triagem como “cliente” para vê-los aqui.'}
+        Qualifique contatos da aba Triagem como “cliente” para vê-los aqui.
       </p>
-      {hasFilter && (
-        <button
-          onClick={onClear}
-          className="mt-4 inline-flex items-center gap-2 text-sm text-emerald-700 hover:text-emerald-800 font-medium"
-        >
-          <RefreshCw size={14} />
-          Limpar busca
-        </button>
-      )}
     </div>
   );
 }

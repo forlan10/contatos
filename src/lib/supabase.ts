@@ -35,14 +35,48 @@ export const TIPO_OPTIONS: ContatoTipo[] = [
   'ignorado',
 ];
 
-export type FunilEtapa = 'Novo' | 'Em Negociacao' | 'Venda Fechada' | 'Perdido';
+export interface FunilEtapa {
+  id: number;
+  nome: string;
+  ordem: number;
+}
 
-export const FUNIL_OPTIONS: FunilEtapa[] = [
-  'Novo',
-  'Em Negociacao',
-  'Venda Fechada',
-  'Perdido',
-];
+export async function fetchFunilEtapas(): Promise<FunilEtapa[]> {
+  if (!supabase) throw new Error('Supabase não configurado');
+  const { data, error } = await supabase
+    .from('funil_etapas')
+    .select('id, nome, ordem')
+    .order('ordem', { ascending: true })
+    .order('id', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as FunilEtapa[];
+}
+
+export async function createFunilEtapa(nome: string, ordem: number): Promise<FunilEtapa> {
+  if (!supabase) throw new Error('Supabase não configurado');
+  const { data, error } = await supabase
+    .from('funil_etapas')
+    .insert({ nome, ordem })
+    .select('id, nome, ordem')
+    .single();
+  if (error) throw error;
+  return data as FunilEtapa;
+}
+
+export async function updateFunilEtapa(
+  id: number,
+  patch: { nome?: string; ordem?: number }
+): Promise<void> {
+  if (!supabase) throw new Error('Supabase não configurado');
+  const { error } = await supabase.from('funil_etapas').update(patch).eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteFunilEtapa(id: number): Promise<void> {
+  if (!supabase) throw new Error('Supabase não configurado');
+  const { error } = await supabase.from('funil_etapas').delete().eq('id', id);
+  if (error) throw error;
+}
 
 export interface Contato {
   id: number;
@@ -53,7 +87,7 @@ export interface Contato {
   descricao: string | null;
   produto_interesse: string | null;
   bairro: string | null;
-  funil_etapa: FunilEtapa | null;
+  funil_etapa: string | null;
   novo: boolean;
 }
 
@@ -89,6 +123,17 @@ export async function fetchContatosByTipo(tipo: ContatoTipo): Promise<Contato[]>
 
 export async function fetchClientes(): Promise<Contato[]> {
   return fetchContatosByTipo('cliente');
+}
+
+export async function countContatosByEtapa(etapa: string): Promise<number> {
+  if (!supabase) throw new Error('Supabase não configurado');
+  const { count, error } = await supabase
+    .from(TABLE_NAME)
+    .select('id', { count: 'exact', head: true })
+    .eq('tipo', 'cliente')
+    .eq('funil_etapa', etapa);
+  if (error) throw error;
+  return count ?? 0;
 }
 
 export async function fetchTriagem(): Promise<Contato[]> {

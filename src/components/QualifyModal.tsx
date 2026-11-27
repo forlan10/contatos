@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  FUNIL_OPTIONS,
   TIPO_OPTIONS,
   type Contato,
   type ContatoTipo,
@@ -11,17 +10,20 @@ import { Check, Loader2, X } from 'lucide-react';
 
 interface Props {
   contato: Contato;
+  etapas: FunilEtapa[];
   onClose: () => void;
   onSave: (id: number, patch: ContatoUpdate) => Promise<void>;
 }
 
-export function QualifyModal({ contato, onClose, onSave }: Props) {
+export function QualifyModal({ contato, etapas, onClose, onSave }: Props) {
   const [nome, setNome] = useState(contato.nome ?? '');
   const [tipo, setTipo] = useState<ContatoTipo>(contato.tipo);
   const [produto, setProduto] = useState(contato.produto_interesse ?? '');
   const [bairro, setBairro] = useState(contato.bairro ?? '');
   const [descricao, setDescricao] = useState(contato.descricao ?? '');
-  const [funil, setFunil] = useState<FunilEtapa>(contato.funil_etapa ?? 'Novo');
+  const [funil, setFunil] = useState<string>(
+    contato.funil_etapa ?? etapas[0]?.nome ?? 'Novo'
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -120,12 +122,12 @@ export function QualifyModal({ contato, onClose, onSave }: Props) {
           <Field label="Etapa do funil">
             <select
               value={funil}
-              onChange={(e) => setFunil(e.target.value as FunilEtapa)}
+              onChange={(e) => setFunil(e.target.value)}
               className={inputCls}
             >
-              {FUNIL_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
+              {etapas.map((opt) => (
+                <option key={opt.id} value={opt.nome}>
+                  {opt.nome}
                 </option>
               ))}
             </select>
